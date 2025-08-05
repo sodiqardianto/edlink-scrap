@@ -1,9 +1,6 @@
 import puppeteer from 'puppeteer';
 import prisma from './lib/prisma.js';
-import { loginToEdlink } from './auth.js';
-import { selectSemester } from './semesterSelector.js';
-import { scrapeCourseData } from './scraper.js';
-import { scrapeGroupMembers } from './groupScraper.js';
+import { loginToEdlink, selectSemester, scrapeCourseData, scrapeGroupMembers } from './index.js';
 import { delay } from './utils.js';
 
 export async function runScraper({ email, password, semester }) {
@@ -69,23 +66,25 @@ export async function runScraper({ email, password, semester }) {
         
         // Step 5: Scrape group members for this course
         console.log(`👥 Scraping groups for course: ${course.nama_mata_kuliah}`);
-        const groupsData = await scrapeGroupMembers(page, course.kode_mata_kuliah);
+        const groupsResult = await scrapeGroupMembers(page, course.kode_mata_kuliah);
         
         // Save groups and members
         const savedGroups = [];
         
-        for (const groupData of groupsData) {
+        // Check if scraping was successful and groups exist
+        if (groupsResult.success && groupsResult.groups && Array.isArray(groupsResult.groups)) {
+          for (const groupData of groupsResult.groups) {
           // Save or update group
           const savedGroup = await prisma.group.upsert({
             where: {
               courseId_nama: {
                 courseId: savedCourse.id,
-                nama: groupData.groupName
+                nama: groupData.groupInfo.groupName
               }
             },
             update: {},
             create: {
-              nama: groupData.groupName,
+              nama: groupData.groupInfo.groupName,
               courseId: savedCourse.id
             }
           });
@@ -98,21 +97,26 @@ export async function runScraper({ email, password, semester }) {
           // Save members
           const savedMembers = [];
           
-          for (const member of groupData.members) {
-            const savedMember = await prisma.member.create({
-              data: {
-                nama: member.nama,
-                peran: member.peran,
-                groupId: savedGroup.id
-              }
-            });
-            savedMembers.push(savedMember);
+          if (groupData.members && Array.isArray(groupData.members)) {
+            for (const member of groupData.members) {
+              const savedMember = await prisma.member.create({
+                data: {
+                  nama: member.name || member.nama,
+                  peran: member.role || member.peran || 'Member',
+                  groupId: savedGroup.id
+                }
+              });
+              savedMembers.push(savedMember);
+            }
           }
           
           savedGroups.push({
             ...savedGroup,
             members: savedMembers
           });
+          }
+        } else {
+          console.log(`⚠️ No groups found or scraping failed for course: ${course.nama_mata_kuliah}`);
         }
         
         savedCourses.push({

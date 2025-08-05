@@ -72,22 +72,31 @@ npm run db:push
 
 ## 🚀 Usage
 
-### Menjalankan Server
+### Mode 1: API Server (Recommended)
+Menjalankan server Express.js yang menyediakan REST API untuk scraping:
+
 ```bash
-# Production mode
+# Production mode - menjalankan server.js
 npm start
 
-# Development mode (dengan auto-reload)
-npm run dev
+# Development mode - menjalankan server.js dengan auto-reload
+npm run dev:server
 
 # Server akan berjalan di http://localhost:3000
 ```
 
-### Menjalankan Scraper Standalone (Legacy)
+### Mode 2: Direct Scraper (Standalone)
+Menjalankan scraper secara langsung tanpa API server:
+
 ```bash
-# Untuk testing scraper secara langsung
-npm run scrape
+# Development mode - menjalankan index.js dengan auto-reload
+npm run dev
+
+# Direct execution - menjalankan index.js sekali
+npm run scrap
 ```
+
+**Catatan:** Mode API Server direkomendasikan untuk production karena menyediakan interface yang lebih fleksibel dan dapat diintegrasikan dengan aplikasi lain.
 
 ### Health Check
 Setelah server berjalan, test dengan:
@@ -473,7 +482,8 @@ edlink-scrap/
 
 | File | Description |
 |------|-------------|
-| `server.js` | **Main server** - Express app dengan middleware dan routes |
+| `server.js` | **API Server** - Express app dengan middleware dan routes untuk REST API |
+| `index.js` | **Direct Scraper** - Standalone scraper untuk eksekusi langsung (tanpa API) |
 | `scraperService.js` | **Core scraper** - Orchestrates seluruh proses scraping |
 | `auth.js` | **Authentication** - Handle login ke platform Edlink |
 | `scraper.js` | **Course scraper** - Scraping data mata kuliah |
@@ -483,15 +493,15 @@ edlink-scrap/
 | `lib/prisma.js` | **Database client** - Prisma client instance |
 | `utils.js` | **Utilities** - Helper functions |
 | `config.js` | **Configuration** - App configuration |
-| `index.js` | **Legacy scraper** - Standalone scraper (tidak digunakan di API) |
 
 ### 📜 Available Scripts
 
 | Script | Command | Description |
 |--------|---------|-------------|
-| **Production** | `npm start` | Menjalankan server production |
-| **Development** | `npm run dev` | Menjalankan server development dengan auto-reload |
-| **Legacy Scraper** | `npm run scrape` | Menjalankan standalone scraper (tidak menggunakan API) |
+| **Production** | `npm start` | Menjalankan API server production (server.js) |
+| **Development Server** | `npm run dev:server` | Menjalankan API server development dengan auto-reload |
+| **Development Scraper** | `npm run dev` | Menjalankan standalone scraper development (index.js) |
+| **Direct Scraper** | `npm run scrap` | Menjalankan standalone scraper langsung (index.js) |
 | **Database** | `npm run db:generate` | Generate Prisma client |
 | **Database** | `npm run db:push` | Push schema ke database |
 | **Database** | `npm run db:migrate` | Menjalankan database migrations |
@@ -499,12 +509,17 @@ edlink-scrap/
 
 ### 🔄 Development Workflow
 
-1. **Setup Development Environment:**
+1. **Setup Development Environment (API Server):**
+   ```bash
+   npm run dev:server
+   ```
+
+2. **Setup Development Environment (Direct Scraper):**
    ```bash
    npm run dev
    ```
 
-2. **Test API dengan curl:**
+3. **Test API dengan curl (untuk API Server mode):**
    ```bash
    # Health check
    curl http://localhost:3000/health
@@ -519,7 +534,7 @@ edlink-scrap/
      }'
    ```
 
-3. **Monitor Database:**
+4. **Monitor Database:**
    ```bash
    # Lihat data courses
    curl http://localhost:3000/api/courses
@@ -527,6 +542,141 @@ edlink-scrap/
    # Lihat data dengan filter semester
    curl "http://localhost:3000/api/courses?semester=2024%20Ganjil"
    ```
+
+## 🚀 Deployment
+
+### Production Deployment
+
+#### 1. Basic Production Setup
+```bash
+# Install dependencies
+npm install --production
+
+# Setup environment variables
+cp .env.example .env
+# Edit .env dengan konfigurasi production
+
+# Setup database
+npm run db:generate
+npm run db:push
+
+# Start production server
+npm start
+```
+
+#### 2. Using PM2 (Recommended)
+PM2 adalah process manager yang direkomendasikan untuk production:
+
+```bash
+# Install PM2 globally
+npm install -g pm2
+
+# Start aplikasi dengan PM2
+pm2 start server.js --name "edlink-scraper-api"
+
+# Atau menggunakan ecosystem file
+pm2 start ecosystem.config.js
+
+# Monitor aplikasi
+pm2 status
+pm2 logs edlink-scraper-api
+
+# Restart aplikasi
+pm2 restart edlink-scraper-api
+
+# Stop aplikasi
+pm2 stop edlink-scraper-api
+```
+
+#### 3. PM2 Ecosystem Configuration
+Buat file `ecosystem.config.js` di root directory:
+
+```javascript
+module.exports = {
+  apps: [{
+    name: 'edlink-scraper-api',
+    script: 'server.js',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production',
+      PORT: 3000
+    },
+    error_file: './logs/err.log',
+    out_file: './logs/out.log',
+    log_file: './logs/combined.log',
+    time: true
+  }]
+};
+```
+
+#### 4. Environment Variables untuk Production
+```env
+# Production Database
+DATABASE_URL="mysql://username:password@localhost:3306/edlink_scraper"
+
+# Server Configuration
+PORT=3000
+NODE_ENV=production
+
+# Security
+JWT_SECRET=your-super-secure-jwt-secret-for-production
+API_RATE_LIMIT=50
+
+# Optional: Default credentials (tidak direkomendasikan)
+# EMAIL=your-email@example.com
+# PASSWORD=your-password
+```
+
+#### 5. Reverse Proxy dengan Nginx (Optional)
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+### Deployment Checklist
+
+- [ ] Environment variables dikonfigurasi dengan benar
+- [ ] Database MySQL berjalan dan dapat diakses
+- [ ] Prisma client sudah di-generate
+- [ ] Database schema sudah di-push
+- [ ] Port 3000 (atau port yang dikonfigurasi) tersedia
+- [ ] PM2 terinstall dan dikonfigurasi
+- [ ] Log directory sudah dibuat (`mkdir logs`)
+- [ ] Firewall dikonfigurasi untuk mengizinkan traffic
+- [ ] SSL certificate dikonfigurasi (jika menggunakan HTTPS)
+
+### Monitoring Production
+
+```bash
+# Monitor dengan PM2
+pm2 monit
+
+# Check logs
+pm2 logs edlink-scraper-api --lines 100
+
+# Check system resources
+pm2 show edlink-scraper-api
+
+# Restart jika diperlukan
+pm2 restart edlink-scraper-api
+```
 
 ## 🚨 Troubleshooting
 

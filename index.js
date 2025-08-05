@@ -271,7 +271,7 @@ export async function scrapeCourseData(page) {
           if (kode_mata_kuliah && mata_kuliah) {
             courses.push({
               kode_mata_kuliah,
-              mata_kuliah,
+              nama_mata_kuliah: mata_kuliah,
               kode_kelas,
               program_studi,
               pengajar,
