@@ -320,6 +320,115 @@ GET /api/courses?semester=2024%20Ganjil
 }
 ```
 
+### 📡 Real-time Scraping Status (Server-Sent Events)
+**Endpoint:** `GET /api/scrape-status/:sessionId`
+
+**Deskripsi:** Endpoint SSE untuk monitoring status scraping secara real-time
+
+**Parameters:**
+- `sessionId`: Session ID yang diperoleh dari response `/api/scrape`
+
+**Headers:**
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+**Event Data Format:**
+```json
+{
+  "sessionId": "scrape_1642234567890_abc123def",
+  "status": "login",
+  "message": "Melakukan login ke sistem...",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "progress": 25
+}
+```
+
+**Status Types:**
+- `connected` - Koneksi SSE berhasil
+- `start` - Memulai proses scraping
+- `initializing` - Memulai browser
+- `login` - Proses login
+- `login_success` - Login berhasil
+- `scraping_courses` - Mengambil data mata kuliah
+- `courses_found` - Mata kuliah ditemukan
+- `processing_course` - Memproses mata kuliah tertentu
+- `scraping_groups` - Mengambil data grup
+- `group_processed` - Grup berhasil diproses
+- `course_completed` - Mata kuliah selesai diproses
+- `saving` - Menyimpan data ke database
+- `complete` - Scraping selesai
+- `error` - Terjadi error
+- `cleanup` - Pembersihan resource
+
+**Contoh Penggunaan JavaScript:**
+```javascript
+// 1. Mulai scraping dan dapatkan sessionId
+const response = await fetch('/api/scrape', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'user@example.com',
+    password: 'password',
+    semester: '2024 Ganjil'
+  })
+});
+
+const result = await response.json();
+const sessionId = result.sessionId;
+
+// 2. Buka koneksi SSE untuk monitoring
+const eventSource = new EventSource(`/api/scrape-status/${sessionId}`);
+
+eventSource.onmessage = function(event) {
+  const data = JSON.parse(event.data);
+  console.log(`[${data.status}] ${data.message}`);
+  
+  if (data.progress) {
+    console.log(`Progress: ${data.progress}%`);
+  }
+  
+  // Auto close pada complete atau error
+  if (data.status === 'complete' || data.status === 'error') {
+    eventSource.close();
+  }
+};
+
+eventSource.onerror = function(event) {
+  console.error('SSE connection error:', event);
+};
+```
+
+**Contoh Penggunaan cURL:**
+```bash
+# 1. Start scraping
+curl -X POST http://localhost:3000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password",
+    "semester": "2024 Ganjil"
+  }'
+
+# Response: {"sessionId": "scrape_1642234567890_abc123def", ...}
+
+# 2. Monitor status
+curl -N http://localhost:3000/api/scrape-status/scrape_1642234567890_abc123def
+```
+
+**Test Interface:**
+Akses `http://localhost:3000/test-sse.html` untuk interface testing SSE yang interaktif.
+
+**Fitur SSE:**
+- ✅ **Real-time Updates** - Status update langsung tanpa polling
+- ✅ **Auto Reconnection** - Browser otomatis reconnect jika koneksi terputus
+- ✅ **Progress Tracking** - Progress percentage untuk setiap tahap
+- ✅ **Error Handling** - Error reporting yang detail
+- ✅ **Session Management** - Multiple concurrent sessions
+- ✅ **Auto Cleanup** - Automatic resource cleanup setelah selesai
+
 ## 🗄️ Database Schema
 
 Proyek ini menggunakan **MySQL** sebagai database dengan **Prisma ORM** untuk manajemen data.

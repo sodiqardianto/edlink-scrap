@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import prisma from '../lib/prisma.js';
 import { runScraper } from '../scraperService.js';
+import scrapingEmitter from '../eventEmitter.js';
 
 const router = express.Router();
 
@@ -17,31 +18,128 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
+// GET /api/scrape-status - Server-Sent Events endpoint untuk real-time status
+router.get('/scrape-status/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  
+  // Set headers untuk SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  // Send initial connection message
+  const initialData = {
+    sessionId,
+    status: 'connected',
+    message: 'Connected to scraping status stream',
+    timestamp: new Date().toISOString()
+  };
+  res.write(`data: ${JSON.stringify(initialData)}\n\n`);
+
+  // Listen untuk status updates dari session ini
+  const statusListener = (data) => {
+    if (data.sessionId === sessionId) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      
+      // Close connection jika status complete atau error
+      if (data.status === 'complete' || data.status === 'error') {
+        setTimeout(() => {
+          res.end();
+        }, 1000); // Delay 1 detik sebelum close
+      }
+    }
+  };
+
+  // Register listener
+  scrapingEmitter.on('status', statusListener);
+
+  // Handle client disconnect
+  req.on('close', () => {
+    scrapingEmitter.removeListener('status', statusListener);
+    console.log(`[${sessionId}] SSE client disconnected`);
+  });
+
+  // Handle connection errors
+  req.on('error', (err) => {
+    console.error(`[${sessionId}] SSE connection error:`, err);
+    scrapingEmitter.removeListener('status', statusListener);
+  });
+
+  // Keep connection alive dengan heartbeat
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(heartbeat);
+      return;
+    }
+    res.write(`: heartbeat\n\n`);
+  }, 30000); // Heartbeat setiap 30 detik
+
+  // Cleanup heartbeat saat connection close
+  req.on('close', () => {
+    clearInterval(heartbeat);
+  });
+});
+
 // POST /api/scrape - Start scraping process
 router.post('/scrape', [
-  body('email').isEmail().withMessage('Valid email is required'),
-  body('password').isLength({ min: 1 }).withMessage('Password is required'),
-  body('semester').isLength({ min: 1 }).withMessage('Semester is required')
+  body('email').isEmail().withMessage('Email harus valid'),
+  body('password').notEmpty().withMessage('Password tidak boleh kosong'),
+  body('semester').notEmpty().withMessage('Semester tidak boleh kosong')
 ], handleValidationErrors, async (req, res) => {
+  const sessionId = scrapingEmitter.generateSessionId();
+  
   try {
     const { email, password, semester } = req.body;
     
-    console.log(`🔄 Starting scrape for ${email}, semester: ${semester}`);
-    
-    // Run the scraper
-    const result = await runScraper({ email, password, semester });
-    
+    // Kirim response dengan sessionId untuk tracking
     res.json({
       success: true,
-      message: 'Scraping completed successfully',
-      data: result
+      message: 'Scraping process started',
+      sessionId: sessionId,
+      statusUrl: `/api/scrape-status/${sessionId}`
     });
+    
+    // Emit initial status
+    scrapingEmitter.emitStatus(sessionId, 'start', 'Memulai proses scraping...');
+    
+    // Jalankan scraping secara asynchronous
+    runScraper(email, password, semester, sessionId)
+      .then((result) => {
+        scrapingEmitter.emitComplete(sessionId, {
+          coursesProcessed: result.coursesProcessed || 0,
+          groupsProcessed: result.groupsProcessed || 0,
+          membersProcessed: result.membersProcessed || 0,
+          duration: result.duration || 'unknown'
+        });
+        
+        // Cleanup session setelah delay
+        setTimeout(() => {
+          scrapingEmitter.cleanupSession(sessionId);
+        }, 60000); // Cleanup setelah 1 menit
+      })
+      .catch((error) => {
+        console.error('Scraping error:', error);
+        scrapingEmitter.emitError(sessionId, 'Scraping gagal: ' + error.message, error);
+        
+        // Cleanup session setelah delay
+        setTimeout(() => {
+          scrapingEmitter.cleanupSession(sessionId);
+        }, 60000);
+      });
+      
   } catch (error) {
-    console.error('Scraping error:', error);
+    console.error('Scraping initialization error:', error);
+    scrapingEmitter.emitError(sessionId, 'Gagal memulai scraping: ' + error.message, error);
+    
     res.status(500).json({
       success: false,
-      error: 'Scraping failed',
-      message: error.message
+      message: 'Failed to start scraping process',
+      error: error.message,
+      sessionId: sessionId
     });
   }
 });

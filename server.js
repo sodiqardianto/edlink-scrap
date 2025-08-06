@@ -3,10 +3,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-import prisma from './lib/prisma.js';
+import path from 'path';
 
 // Load environment variables
 dotenv.config();
+
+// Import prisma
+import prisma from './lib/prisma.js';
 
 // Initialize Express app
 const app = express();
@@ -33,6 +36,8 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+
+
 // Import and use API routes
 import apiRoutes from './routes/api.js';
 app.use('/api', apiRoutes);
@@ -47,7 +52,7 @@ app.use((err, req, res, next) => {
 });
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
